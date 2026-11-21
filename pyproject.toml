@@ -1,0 +1,86 @@
+[project]
+name = "curio"
+version = "0.1.0"
+description = "Agentic Multimodal Image-to-Article Matching Engine"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [
+    { name = "Willis Kipgen", email = "itswilliskipsjr@gmail.com" },
+]
+
+dependencies = [
+    # Web framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+
+    # Database
+    "asyncpg>=0.30.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "alembic>=1.14.0",
+    "pgvector>=0.3.6",
+
+    # LLM and AI
+    "google-genai>=1.0.0",
+
+    # Embeddings
+    "open-clip-torch>=2.29.0",
+    "sentence-transformers>=3.3.0",
+
+    # ML / Ranking
+    "lightgbm>=4.5.0",
+    "scikit-learn>=1.6.0",
+    "ranx>=0.3.0",
+
+    # Image processing
+    "Pillow>=11.0.0",
+    "imagehash>=4.3.0",
+
+    # Utilities
+    "httpx>=0.28.0",
+    "structlog>=24.4.0",
+    "tenacity>=9.0.0",
+    "python-dotenv>=1.0.0",
+    "typer>=0.14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["curio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests requiring a database",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
