@@ -36,6 +36,10 @@ docker-compose.override.yml
 # Data (large files — download via scripts)
 data/images/
 data/raw/
+data/image_manifest.json
+data/article_manifest.json
+data/articles/dev/
+data/articles/test/
 *.csv
 *.tsv
 !data/README.md

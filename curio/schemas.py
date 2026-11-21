@@ -7,7 +7,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Vision
 # ---------------------------------------------------------------------------
@@ -46,7 +45,7 @@ class ArticleBrief(BaseModel):
 
 
 class GuardResult(BaseModel):
-    """Mismatch guard decision for an image–article pair."""
+    """Mismatch guard decision for an image-article pair."""
 
     decision: Literal["ACCEPT", "REJECT", "NO_CONFIDENT_MATCH"]
     reasons: list[str]
