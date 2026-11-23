@@ -80,7 +80,7 @@ class IndexingService:
             tags, tokens = self.vision.tag_image_bytes(image_bytes)
             await CostTracker.record_call(
                 session=session,
-                model="gemini-2.0-flash",
+                model="gemini-3.5-flash-lite",
                 operation="vision_tag",
                 input_tokens=tokens["input"],
                 output_tokens=tokens["output"],

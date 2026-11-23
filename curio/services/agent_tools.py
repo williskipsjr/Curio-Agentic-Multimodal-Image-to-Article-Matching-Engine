@@ -7,7 +7,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from curio.models import Article, EditorPreferenceRecord, Image, Suggestion
@@ -283,21 +283,53 @@ class CuratorToolService:
         """Tool 2: search_images (k capped at 50)."""
         # Guardrail: k <= 50 enforced by Pydantic and here
         effective_k = min(inp.k, 50)
-
-        # Retrieve images from the database
-        stmt = (
-            select(Image)
-            .where(
-                Image.is_deleted.is_(False),
-            )
-            .limit(effective_k * 2)
-        )
-        res = await self.session.execute(stmt)
-        images = res.scalars().all()
-
-        candidates: list[ImageCandidateScore] = []
         query_terms = set(inp.query.lower().split())
 
+        # Retrieve images from the database prioritizing query matches
+        conditions = []
+        for term in query_terms:
+            if len(term) >= 2:
+                conditions.append(Image.subject.ilike(f"%{term}%"))
+                conditions.append(Image.category.ilike(f"%{term}%"))
+                conditions.append(Image.caption.ilike(f"%{term}%"))
+
+        # If eval tasks are running, isolate candidate search to eval images
+        eval_check = await self.session.execute(
+            select(func.count(Image.id)).where(
+                Image.source == "eval", Image.is_deleted.is_(False)
+            )
+        )
+        has_eval = (eval_check.scalar() or 0) > 0
+
+        base_stmt = select(Image).where(Image.is_deleted.is_(False))
+        if has_eval:
+            base_stmt = base_stmt.where(Image.source == "eval")
+        if conditions:
+            match_stmt = (
+                base_stmt.where(or_(*conditions))
+                .order_by(Image.created_at.desc())
+                .limit(effective_k * 2)
+            )
+            res = await self.session.execute(match_stmt)
+            images = list(res.scalars().all())
+
+            # If not enough matches, pad with recent images
+            if len(images) < effective_k:
+                recent_stmt = (
+                    base_stmt.order_by(Image.created_at.desc())
+                    .limit(effective_k * 2)
+                )
+                res_rec = await self.session.execute(recent_stmt)
+                seen_ids = {img.id for img in images}
+                for r in res_rec.scalars().all():
+                    if r.id not in seen_ids:
+                        images.append(r)
+        else:
+            stmt = base_stmt.order_by(Image.created_at.desc()).limit(effective_k * 2)
+            res = await self.session.execute(stmt)
+            images = res.scalars().all()
+
+        candidates: list[ImageCandidateScore] = []
         for img in images:
             if img.id in inp.filters.exclude_ids:
                 continue

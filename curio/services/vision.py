@@ -68,7 +68,7 @@ class VisionTaggingService:
             image = PILImage.open(BytesIO(image_bytes))
 
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3.5-flash-lite",
                 contents=[image, VISION_TAG_PROMPT],
                 config={
                     "response_mime_type": "application/json",
