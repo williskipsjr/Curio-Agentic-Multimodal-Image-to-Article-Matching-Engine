@@ -234,15 +234,14 @@ class HybridRetrievalService:
         final_k: int = 50,
         rrf_constant: int = 60,
     ) -> list[RetrievalCandidate]:
-        """Execute all 3 channels in parallel and merge with Reciprocal Rank Fusion."""
-        # Run channels concurrently
-        keyword_task = self.search_keyword(session, query_text, limit=top_k_per_channel)
-        dense_task = self.search_dense(session, query_text, limit=top_k_per_channel)
-        clip_task = self.search_clip(session, query_text, limit=top_k_per_channel)
+        """Execute all 3 channels sequentially and merge with Reciprocal Rank Fusion.
 
-        keyword_run, dense_run, clip_run = await asyncio.gather(
-            keyword_task, dense_task, clip_task
-        )
+        Note: AsyncSession is not safe for concurrent operations, so channels
+        are run sequentially rather than with asyncio.gather().
+        """
+        keyword_run = await self.search_keyword(session, query_text, limit=top_k_per_channel)
+        dense_run = await self.search_dense(session, query_text, limit=top_k_per_channel)
+        clip_run = await self.search_clip(session, query_text, limit=top_k_per_channel)
 
         channel_runs = {
             "keyword": keyword_run,

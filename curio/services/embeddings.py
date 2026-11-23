@@ -70,6 +70,10 @@ class EmbeddingService:
 
         return features.squeeze(0).cpu().numpy().tolist()  # type: ignore[no-any-return]
 
+    def embed_image(self, image_bytes: bytes) -> list[float]:
+        """Alias for embed_image_bytes."""
+        return self.embed_image_bytes(image_bytes)
+
     def embed_article_for_clip(self, text: str) -> list[float]:
         """Embed text query/article into the CLIP multimodal space (512 dimensions)."""
         import torch
@@ -82,3 +86,11 @@ class EmbeddingService:
             features = features / features.norm(dim=-1, keepdim=True)
 
         return features.squeeze(0).cpu().numpy().tolist()  # type: ignore[no-any-return]
+
+    def embed_clip_text(self, text: str) -> list[float]:
+        """Alias for embed_article_for_clip."""
+        return self.embed_article_for_clip(text)
+
+    def embed_text_clip(self, text: str) -> list[float]:
+        """Alias for embed_article_for_clip."""
+        return self.embed_article_for_clip(text)

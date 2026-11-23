@@ -20,6 +20,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +43,9 @@ UNSPLASH_LITE_PHOTOS_URL = (
     "https://unsplash.com/data/lite/latest"  # Requires accepting terms
 )
 
-# We use the Unsplash API for targeted category downloads instead
+# We use the Unsplash API or Pexels API for category downloads
 UNSPLASH_API_BASE = "https://api.unsplash.com"
+PEXELS_API_BASE = "https://api.pexels.com/v1"
 
 # Categories with target counts — total ~3,200 (3,000 corpus + 200 holdback)
 CATEGORIES: dict[str, dict[str, Any]] = {
@@ -118,7 +122,7 @@ def _search_unsplash(
     page: int,
     client: httpx.Client,
     api_key: str,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], int]:
     """Search Unsplash API for photos matching a query."""
     resp = client.get(
         f"{UNSPLASH_API_BASE}/search/photos",
@@ -126,8 +130,48 @@ def _search_unsplash(
         headers={"Authorization": f"Client-ID {api_key}"},
         timeout=15.0,
     )
+    remaining = int(resp.headers.get("x-ratelimit-remaining", 50))
+    logger.info("Unsplash API call ('%s' p.%d) -> remaining rate limit: %d", query, page, remaining)
     resp.raise_for_status()
-    return resp.json().get("results", [])  # type: ignore[no-any-return]
+    return resp.json().get("results", []), remaining
+
+
+def _search_pexels(
+    query: str,
+    per_page: int,
+    page: int,
+    client: httpx.Client,
+    api_key: str,
+) -> tuple[list[dict[str, Any]], int]:
+    """Search Pexels API for photos matching a query."""
+    resp = client.get(
+        f"{PEXELS_API_BASE}/search",
+        params={"query": query, "per_page": per_page, "page": page},
+        headers={"Authorization": api_key},
+        timeout=15.0,
+    )
+    remaining = int(resp.headers.get("x-ratelimit-remaining", 200))
+    resp.raise_for_status()
+    photos = resp.json().get("photos", [])
+    results: list[dict[str, Any]] = []
+    for p in photos:
+        src = p.get("src", {})
+        results.append(
+            {
+                "id": f"px_{p['id']}",
+                "urls": {
+                    "small": src.get("medium", src.get("small", src.get("original"))),
+                    "raw": src.get("original"),
+                },
+                "width": p.get("width", 0),
+                "height": p.get("height", 0),
+                "description": p.get("alt", ""),
+                "alt_description": p.get("alt", ""),
+                "user": {"name": p.get("photographer", "")},
+                "source": "pexels",
+            }
+        )
+    return results, remaining
 
 
 def download_category(
@@ -138,15 +182,26 @@ def download_category(
     api_key: str,
     dest_dir: Path,
     seen_ids: set[str],
+    provider: str = "unsplash",
 ) -> list[dict[str, Any]]:
     """Download images for a single category. Returns manifest entries."""
     entries: list[dict[str, Any]] = []
     page = 1
-    per_page = min(count, 30)  # Unsplash API max is 30
+    per_page = min(count, 80 if provider == "pexels" else 30)
 
     while len(entries) < count:
         try:
-            results = _search_unsplash(query, per_page, page, client, api_key)
+            if provider == "pexels":
+                results, remaining = _search_pexels(query, per_page, page, client, api_key)
+            else:
+                results, remaining = _search_unsplash(query, per_page, page, client, api_key)
+
+            if remaining <= 2:
+                logger.warning(
+                    "Rate limit safety guard triggered: only %d requests remaining. Pausing download.",
+                    remaining,
+                )
+                break
         except httpx.HTTPError as e:
             logger.error("API error for '%s' page %d: %s", query, page, e)
             break
@@ -223,12 +278,23 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    # Check for Unsplash API key
-    api_key = os.environ.get("UNSPLASH_ACCESS_KEY", "")
-    if not api_key:
+    # Check for Pexels or Unsplash API key
+    pexels_key = os.environ.get("PEXELS_API_KEY", "")
+    unsplash_key = os.environ.get("UNSPLASH_ACCESS_KEY", "")
+
+    if pexels_key:
+        provider = "pexels"
+        api_key = pexels_key
+        logger.info("Using Pexels API provider (high throughput).")
+    elif unsplash_key and unsplash_key != "your-unsplash-access-key-here":
+        provider = "unsplash"
+        api_key = unsplash_key
+        logger.info("Using Unsplash API provider.")
+    else:
         logger.error(
-            "UNSPLASH_ACCESS_KEY not set. "
-            "Get one at https://unsplash.com/developers and add it to .env"
+            "Neither PEXELS_API_KEY nor UNSPLASH_ACCESS_KEY set in .env. "
+            "Please add either PEXELS_API_KEY (from https://www.pexels.com/api/) "
+            "or UNSPLASH_ACCESS_KEY (from https://unsplash.com/developers) to your .env file."
         )
         sys.exit(1)
 
@@ -236,15 +302,18 @@ def main() -> None:
     CORPUS_DIR.mkdir(parents=True, exist_ok=True)
     HOLDBACK_DIR.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Target: %d images across %d categories", TOTAL_TARGET, len(CATEGORIES))
+    # If using Unsplash, cap at 25 images per category to stay strictly within 50 requests/hr
+    per_cat_limit = 25 if provider == "unsplash" else 80
+    effective_total = sum(min(c["count"], per_cat_limit) for c in CATEGORIES.values())
+    logger.info("Target: ~%d images across %d categories using %s", effective_total, len(CATEGORIES), provider)
 
     all_entries: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
 
     with httpx.Client() as client:
         for query, info in CATEGORIES.items():
-            count = info["count"]
-            logger.info("Downloading '%s' (%d images)...", query, count)
+            count = min(info["count"], per_cat_limit)
+            logger.info("Downloading '%s' (up to %d images)...", query, count)
 
             entries = download_category(
                 query=query,
@@ -254,13 +323,15 @@ def main() -> None:
                 api_key=api_key,
                 dest_dir=CORPUS_DIR,
                 seen_ids=seen_ids,
+                provider=provider,
             )
             all_entries.extend(entries)
 
-    # Split: last HOLDBACK_COUNT go to holdback
-    if len(all_entries) > HOLDBACK_COUNT:
-        corpus_entries = all_entries[:-HOLDBACK_COUNT]
-        holdback_entries = all_entries[-HOLDBACK_COUNT:]
+    # Split: last portion go to holdback for freshness testing
+    holdback_count = min(50, len(all_entries) // 8)
+    if len(all_entries) > holdback_count:
+        corpus_entries = all_entries[:-holdback_count]
+        holdback_entries = all_entries[-holdback_count:]
 
         # Move holdback images to holdback directory
         for entry in holdback_entries:
@@ -269,7 +340,7 @@ def main() -> None:
             if src.exists():
                 src.rename(dst)
                 entry["local_path"] = str(dst.relative_to(PROJECT_ROOT))
-                entry["holdback"] = True
+            entry["holdback"] = True
     else:
         corpus_entries = all_entries
         holdback_entries = []

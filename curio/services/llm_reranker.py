@@ -95,7 +95,7 @@ Candidates to rank:
 """
         try:
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3.5-flash-lite",
                 contents=[LISTWISE_PROMPT, prompt],
                 config={
                     "response_mime_type": "application/json",
