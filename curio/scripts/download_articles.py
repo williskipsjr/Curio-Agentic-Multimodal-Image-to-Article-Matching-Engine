@@ -351,7 +351,10 @@ def main() -> None:
     all_articles: list[dict[str, Any]] = []
     no_match_fetched: list[dict[str, Any]] = []
 
-    with httpx.Client() as client:
+    headers = {
+        "User-Agent": "CurioBot/1.0 (https://github.com/williskipsjr/Curio; curio-matching@flyrank.ai)"
+    }
+    with httpx.Client(headers=headers) as client:
         # Fetch matching articles
         logger.info("Fetching %d matching articles...", len(MATCH_ARTICLES))
         for i, article_spec in enumerate(MATCH_ARTICLES):

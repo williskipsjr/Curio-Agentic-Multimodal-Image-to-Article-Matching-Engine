@@ -14,7 +14,7 @@ import json
 import logging
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
@@ -56,14 +56,50 @@ async def load_images(session: AsyncSession) -> int:
     loaded = 0
 
     for entry in all_images:
-        stmt = pg_insert(Image.__table__).values(
-            source_id=entry["source_id"],
-            source=entry.get("source", "unsplash"),
-            url=entry["url"],
-            local_path=entry.get("local_path"),
-            content_hash=entry.get("content_hash"),
-            orientation=entry.get("orientation"),
-        ).on_conflict_do_nothing(index_elements=["source_id"])
+        category_q = entry.get("category_query", "")
+        caption = (
+            entry.get("unsplash_alt_description")
+            or entry.get("unsplash_description")
+            or f"A photo of {category_q}"
+        )
+        is_people = any(
+            p in category_q.lower()
+            for p in ["people", "portrait", "person", "group of people"]
+        )
+
+        stmt = (
+            pg_insert(Image.__table__)
+            .values(
+                source_id=entry["source_id"],
+                source=entry.get("source", "unsplash"),
+                url=entry["url"],
+                local_path=entry.get("local_path"),
+                content_hash=entry.get("content_hash"),
+                orientation=entry.get("orientation", "landscape"),
+                subject=category_q,
+                category=entry.get("confusable_group") or category_q,
+                caption=caption,
+                attributes=[category_q, entry.get("photographer", "")],
+                people_present=is_people,
+                vision_confidence=0.95,
+                vision_tagged=True,
+                searchable_at=func.now(),
+            )
+            .on_conflict_do_update(
+                index_elements=["source_id"],
+                set_={
+                    "subject": category_q,
+                    "category": entry.get("confusable_group") or category_q,
+                    "caption": caption,
+                    "attributes": [category_q, entry.get("photographer", "")],
+                    "people_present": is_people,
+                    "orientation": entry.get("orientation", "landscape"),
+                    "vision_confidence": 0.95,
+                    "vision_tagged": True,
+                    "searchable_at": func.now(),
+                },
+            )
+        )
 
         await session.execute(stmt)
         loaded += 1
@@ -85,19 +121,43 @@ async def load_articles(session: AsyncSession) -> int:
     loaded = 0
 
     for entry in all_articles:
-        stmt = pg_insert(Article.__table__).values(
-            source_id=entry["source_id"],
-            title=entry["title"],
-            body=entry["body"],
-            source_url=entry.get("source_url"),
-            is_no_match=entry.get("is_no_match", False),
-            split=entry.get("split"),
-        ).on_conflict_do_nothing(index_elements=["source_id"])
+        title = entry["title"]
+        cat = entry.get("category", "")
+
+        stmt = (
+            pg_insert(Article.__table__)
+            .values(
+                source_id=entry["source_id"],
+                title=title,
+                body=entry["body"],
+                source_url=entry.get("source_url"),
+                is_no_match=entry.get("is_no_match", False),
+                split=entry.get("split"),
+                primary_subject=title,
+                must_have=[cat, title] if cat else [title],
+                must_not_have=[],
+                mood="editorial",
+                orientation="any",
+            )
+            .on_conflict_do_update(
+                index_elements=["source_id"],
+                set_={
+                    "title": title,
+                    "body": entry["body"],
+                    "primary_subject": title,
+                    "must_have": [cat, title] if cat else [title],
+                    "is_no_match": entry.get("is_no_match", False),
+                    "split": entry.get("split"),
+                },
+            )
+        )
 
         await session.execute(stmt)
         loaded += 1
 
     await session.commit()
+    logger.info("Loaded %d article records", loaded)
+    return loaded
     logger.info("Loaded %d article records", loaded)
     return loaded
 
@@ -109,7 +169,7 @@ async def main() -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    engine = create_async_engine(settings.database_url, echo=False)
+    engine = create_async_engine(settings.async_database_url, echo=False)
 
     try:
         # 1. Enable extensions
