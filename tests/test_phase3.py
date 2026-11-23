@@ -151,6 +151,8 @@ class TestLLMJudgeAndKappa:
 
     def test_judge_heuristic_grading(self) -> None:
         judge = LLMJudge()
+        judge.client = None  # Force heuristic grading path
+        judge.api_key = None  # Prevent _get_client from re-creating
         grade, explanation = judge.grade_pair(
             article_title="Red Fox",
             primary_subject="red fox",
