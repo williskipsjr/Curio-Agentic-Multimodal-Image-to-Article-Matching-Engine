@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -111,3 +111,56 @@ class MatchResult(BaseModel):
     scores: dict[str, float]
     guard: GuardResult
     reasons: list[str] = Field(default_factory=list)
+
+
+class AgentChatRequest(BaseModel):
+    """Request body for multi-turn curator agent chat."""
+
+    article_id: UUID
+    editor_id: UUID
+    message: str
+    session_id: str | None = None
+
+
+class AgentChatResponse(BaseModel):
+    """Response from the curator agent chat endpoint."""
+
+    message: str
+    decision: str | None = None
+    image_id: UUID | None = None
+    confidence: float | None = None
+    reasons: list[str] = Field(default_factory=list)
+    alternatives: list[UUID] = Field(default_factory=list)
+    trace: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class SuggestionReviewRequest(BaseModel):
+    """Request body for approving or rejecting a suggestion."""
+
+    comment: str | None = None
+
+
+class SuggestionResponse(BaseModel):
+    """Suggestion representation."""
+
+    id: UUID
+    article_id: UUID
+    image_id: UUID
+    editor_id: UUID
+    status: str
+    guard_result: str
+    guard_reasons: list[str] = Field(default_factory=list)
+    confidence: float | None = None
+    reasons: list[str] = Field(default_factory=list)
+    review_comment: str | None = None
+
+
+class CostSummaryResponse(BaseModel):
+    """Cost ledger and budget summary response."""
+
+    daily_budget_usd: float
+    today_spent_usd: float
+    budget_exceeded: bool
+    total_spent_usd: float
+    breakdown: list[dict[str, Any]] = Field(default_factory=list)
+
